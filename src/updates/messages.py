@@ -62,7 +62,6 @@ def process_messages(bot, message, u):
             u.increaseStat('stats_trains_bynum')
 
             raw = api.call('andamentoTreno', results[0][1], message.text)  # andamentoTreno; departure station; number
-            u.addRecentElement('trains', results[0][1] + "_" + message.text + "@" + raw['compNumeroTreno'])
             text = format.formatTrain(raw)
             bot.api.call('sendMessage', {
                 'chat_id': chat.id, 'text': text, 'parse_mode': 'HTML', 'reply_markup':
@@ -77,7 +76,10 @@ def process_messages(bot, message, u):
                          {"text": "📊 Grafico ritardo", "callback_data": "train@{d}_{n}@graph"
                           .format(d=results[0][1],
                                   n=message.text)}],
-                        [{"text": "⬅️ Torna indietro", "callback_data": "home"}]
+                        [{"text": "⚠ Segui", "callback_data": "train@{d}_{n}@follow"
+                         .format(d=results[0][1],
+                                 n=message.text)},
+                         {"text": "⬅️ Torna indietro", "callback_data": "home"}]
                     ]}
                 )
             })
@@ -206,14 +208,15 @@ def process_messages(bot, message, u):
 
     elif state == "train_byiti_3":
         try:
-            date = parse(message.text, dayfirst=True)
+            date = parse(message.text)
         except ValueError:
             text = (
                 "<b>🛤 Cerca treno</b> per itinerario"
                 "\nL'orario inserito <b>non è valido</b>."
-                "\n<b>Esempi</b>: <code>{a}</code>; <code>{b}</code>"
-                .format(a=datetime.now().strftime("%H:%M %d/%m/%y"),
-                        b=datetime.now().strftime("%H:%M"))
+                "\n<b>Esempi</b>: <code>{a}</code>; <code>{b}</code>; <code>{c}</code>"
+                .format(a=datetime.now().strftime('%d/%m %H:%M'),
+                        b=datetime.now().strftime("%H:%M %d/%m/%y"),
+                        c=datetime.now().strftime("%H:%M"))
             )
             bot.api.call('sendMessage', {
                 'chat_id': chat.id, 'text': text, 'parse_mode': 'HTML', 'reply_markup':
@@ -235,10 +238,10 @@ def process_messages(bot, message, u):
                 x += 1
             return __str
 
-        station_a = u.getRedis('iti_station1').decode('utf-8')
-        station_b = u.getRedis('iti_station2').decode('utf-8')
-        u.addRecentElement('itineraries', u.formatRecentItineraryHash(station_a, station_b))
-        station_a, station_b = minifyStation(station_a), minifyStation(station_b)
+        station_a = minifyStation(u.getRedis('iti_station1').decode('utf-8'))
+        station_b = minifyStation(u.getRedis('iti_station2').decode('utf-8'))
+        u.delRedis('iti_station1')
+        u.delRedis('iti_station2')
 
         u.increaseStat('stats_trains_byiti')
 
@@ -276,9 +279,8 @@ def process_messages(bot, message, u):
 
         elif len(results) == 1:
             u.increaseStat('stats_stations')
-            u.addRecentElement("stations", u.formatRecentStationHash(results[0]['nomeLungo'], results[0]['id']))
 
-            text = format.formatStation(results[0]['nomeLungo'], results[0]['id'])
+            text = format.formatStation(results[0]['nomeLungo'])
             bot.api.call('sendMessage', {
                 'chat_id': chat.id, 'text': text, 'parse_mode': 'HTML', 'reply_markup':
                     json.dumps(

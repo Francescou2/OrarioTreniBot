@@ -28,7 +28,7 @@ from botogram.api import APIError
 import config
 from . import global_messages
 from ..viaggiatreno import viaggiatreno, format
-from ..viaggiatreno.dateutils import is_DST, format_timestamp
+from ..viaggiatreno.dateutils import is_DST
 
 r = redis.StrictRedis(host=config.REDIS_HOST, port=config.REDIS_PORT, db=config.REDIS_DB, password=config.REDIS_PASSWORD)
 
@@ -93,10 +93,6 @@ def process_callback(bot, cb, u):
         cb.notify("ℹ️ Altre informazioni")
 
     elif cb.query == "stats":
-        cb.notify("📈 Sto generando le statistiche, attendere...")
-
-        viaggiatreno_stats = json.loads(api.call("statistiche", 0))
-
         users = []
         for user in r.keys("user:*"):
             users.append(int(user[5:]))
@@ -111,7 +107,7 @@ def process_callback(bot, cb, u):
         stations = 0
         for user in users:
             user_hash = "user:" + str(user)
-            active_users += 1 if r.hget(user_hash, "active").decode('utf-8') == "True" else 0
+            active_users += 1 if bool(r.hget(user_hash, "active")) else 0
             total_users += 1
 
             start_command += int(r.hget(user_hash, 'stats_command_start')) \
@@ -141,7 +137,7 @@ def process_callback(bot, cb, u):
             if r.hget(u.rhash, 'stats_stations') else 0
 
         text = (
-            "📈 <b>Statistiche</b>"
+            "<b>Statistiche</b>"
             "\n➖➖ 👤 <i>Utenti</i>"
             "\n<b>Utenti attivi</b>: {au}"
             "\n<b>Utenti totali</b>: {tu}"
@@ -153,18 +149,12 @@ def process_callback(bot, cb, u):
             "\n<b>Treni cercati</b> per numero: {tr_bynum} <i>(tu {ptr_bynum})</i>"
             "\n<b>Treni cercati</b> per itinerario: {tr_byiti} <i>(tu {ptr_byiti})</i>"
             "\n<b>Stazioni cercate</b> per nome: {st} <i>(tu {pst})</i>"
-            "\n➖➖ 🚅 <i>Circolazione ferroviaria</i>"
-            "\n<b>Treni di oggi</b>: {tt}"
-            "\n<b>Treni circolanti</b>: {ct}"
-            "\n<b>Ultimo aggiornamento</b>: {lu}"
             "\n<i>Le statistiche sono aggiornate a partire dal 27/07/2017</i>"
             .format(au=active_users, tu=total_users, sc=start_command, cc=callbacks_count, iq=inline_queries,
                     psc=personal_start_command, pcc=personal_callback_count, piq=personal_inline_queries,
                     tr_bynum=trains_bynum, ptr_bynum=personal_trains_bynum,
                     tr_byiti=trains_byiti, ptr_byiti=personal_trains_byiti,
-                    st=stations, pst=personal_stations,
-                    tt=viaggiatreno_stats['treniGiorno'], ct=viaggiatreno_stats['treniCircolanti'],
-                    lu=format_timestamp(viaggiatreno_stats['ultimoAggiornamento'], "%H:%M"))
+                    st=stations, pst=personal_stations)
         )
         bot.api.call("editMessageText", {
             "chat_id": cb.chat.id, "message_id": cb.message.message_id, "parse_mode": "HTML",
@@ -175,6 +165,7 @@ def process_callback(bot, cb, u):
                 ]}
             )
         })
+        cb.notify("📈 Statistiche")
 
     elif cb.query == "train":
         text = (
@@ -198,7 +189,6 @@ def process_callback(bot, cb, u):
 
     elif cb.query == "train_bynum":
         u.state("train_bynum")
-        last_trains = u.formatRecentTrainsKeyboard()
         text = (
             "<b>🚅 Cerca treno</b> per numero"
             "\nInserisci il <b>numero di treno</b> (senza nessuna sigla prima, per esempio <code>9650</code>)"
@@ -207,17 +197,16 @@ def process_callback(bot, cb, u):
             "chat_id": cb.chat.id, "message_id": cb.message.message_id, "text": text,
             "parse_mode": "HTML", "reply_markup":
             json.dumps(
-                {"inline_keyboard":
-                    last_trains + [[{"text": "🛤 Cerca invece per itinerario", "callback_data": "train_byiti"}],
-                                   [{"text": "⬅️ Torna indietro", "callback_data": "home"}]]
-                 }
+                {"inline_keyboard": [
+                    [{"text": "🛤 Cerca invece per itinerario", "callback_data": "train_byiti"}],
+                    [{"text": "⬅️ Torna indietro", "callback_data": "home"}]
+                ]}
             )
         })
         cb.notify("1️⃣ Cerca treno per numero")
 
     elif cb.query == "train_byiti":
         u.state("train_byiti")
-        last_itineraries = u.formatRecentItinerariesKeyboard()
         text = (
             "<b>🛤 Cerca treno</b> per itinerario"
             "\nInserisci, come prima cosa, la <b>stazione di partenza</b>"
@@ -226,18 +215,16 @@ def process_callback(bot, cb, u):
             "chat_id": cb.chat.id, "message_id": cb.message.message_id, "text": text,
             "parse_mode": "HTML", "reply_markup":
                 json.dumps(
-                    {"inline_keyboard":
-                        last_itineraries +
-                        [[{"text": "1️⃣ Cerca invece per numero", "callback_data": "train_bynum"}],
-                         [{"text": "⬅️ Torna indietro", "callback_data": "home"}]]
-                     }
+                    {"inline_keyboard": [
+                        [{"text": "1️⃣ Cerca invece per numero", "callback_data": "train_bynum"}],
+                        [{"text": "⬅️ Torna indietro", "callback_data": "home"}]
+                    ]}
                 )
         })
         cb.notify("🛤 Cerca treno per itinerario")
 
     elif cb.query == "station":
         u.state("station")
-        last_stations = u.formatRecentStationsKeyboard()
         text = (
             "<b>🚉 Cerca stazione</b>"
             "\nInserisci il <b>nome</b> della stazione che vuoi cercare"
@@ -246,9 +233,9 @@ def process_callback(bot, cb, u):
             "chat_id": cb.chat.id, "message_id": cb.message.message_id, "text": text,
             "parse_mode": "HTML", "reply_markup":
                 json.dumps(
-                    {"inline_keyboard":
-                        last_stations + [[{"text": "⬅️ Torna indietro", "callback_data": "home"}]]
-                     }
+                    {"inline_keyboard": [
+                        [{"text": "⬅️ Torna indietro", "callback_data": "home"}]
+                    ]}
                 )
         })
         cb.notify("🚉 Cerca stazione")
@@ -278,7 +265,6 @@ def process_callback(bot, cb, u):
 
         if not arguments:
             u.increaseStat('stats_trains_bynum')
-            u.addRecentElement('trains', cb.query.split("@")[1] + "@" + raw['compNumeroTreno'])
 
             text = format.formatTrain(raw)
             bot.api.call('editMessageText', {
@@ -310,7 +296,6 @@ def process_callback(bot, cb, u):
                         ]}
                     )
             })
-            return
 
         elif arguments[0] == "update":
             text = format.formatTrain(raw)
@@ -323,8 +308,11 @@ def process_callback(bot, cb, u):
                         {"inline_keyboard": [
                             [{"text": "🔄 Aggiorna le informazioni", "callback_data": cb.query}],
                             [{"text": "🚉 Fermate", "callback_data": "@".join(cb.query.split("@")[:-1]) + "@stops"},
-                             {"text": "📊 Grafico ritardo", "callback_data": "@".join(cb.query.split("@")[:-1]) + "@graph"}],
-                            [{"text": "⬅️ Torna indietro", "callback_data": "home"}]
+                             {"text": "📊 Grafico ritardo", "callback_data": cb.query + "@graph"}],
+                            [{"text": "⚠ Segui", "callback_data": "train@{d}_{n}@follow"
+                             .format(d=departure_station,
+                                     n=train)},
+                             {"text": "⬅️ Torna indietro", "callback_data": "home"}]
                         ]}
                     )
                 })
@@ -343,6 +331,26 @@ def process_callback(bot, cb, u):
                     {"inline_keyboard": inline_keyboard}
                 )
             })
+            return
+
+        elif arguments[0] == "follow":
+            cb.notify("⚠ Inseguimento per il treno {d} {n} attivato".format(d=departure_station, n=train))
+            # Inserisci dentro REDIS
+            with r.pipeline() as pipe:
+                while True:
+                    try:
+                        k = "follow_{d}_{n}".format(d=departure_station, n=train)
+                        pipe.watch(k)
+                        cur = pipe.get(k)
+                        if cur is None:
+                            cur = []
+                        else:
+                            cur = json.loads(cur)
+                        cur.append(cb.chat.id)
+                        pipe.set(k, json.dumps(cur))
+                        break
+                    except WatchError:
+                        continue
             return
 
         elif arguments[0] == "stop":
@@ -364,7 +372,6 @@ def process_callback(bot, cb, u):
                 )
                 return
 
-            cb.notify("📊 Grafico per il treno {n} generato con successo".format(n=train))
             cb.message.reply_with_photo(filename)
             os.remove(filename)
             return
@@ -404,9 +411,10 @@ def process_callback(bot, cb, u):
             text = (
                 "<b>🛤 Cerca treno</b> per itinerario"
                 "\nInserisci ora <b>la data</b> e/o <b>l'orario di partenza</b> desiderati "
-                "(per esempio: <code>{a}</code>; <code>{b}</code>"
-                .format(a=datetime.now().strftime("%H:%M %d/%m/%y"),
-                        b=datetime.now().strftime("%H:%M"))
+                "(per esempio: <code>{a}</code>; <code>{b}</code>; <code>{c}</code>)"
+                .format(a=datetime.now().strftime('%d/%m %H:%M'),
+                        b=datetime.now().strftime("%H:%M %d/%m/%y"),
+                        c=datetime.now().strftime("%H:%M"))
             )
             bot.api.call('editMessageText', {
                 'chat_id': cb.chat.id, 'message_id': cb.message.message_id,
@@ -423,9 +431,7 @@ def process_callback(bot, cb, u):
 
         elif not arguments:
             u.increaseStat('stats_stations')
-            u.addRecentElement("stations", u.formatRecentStationHash(station_name, station))
-
-            text = format.formatStation(station_name, station)
+            text = format.formatStation(station_name)
             bot.api.call('editMessageText', {
                 'chat_id': cb.chat.id, 'message_id': cb.message.message_id,
                 'text': text, 'parse_mode': 'HTML', 'reply_markup':
@@ -443,7 +449,7 @@ def process_callback(bot, cb, u):
             return
 
         elif len(arguments) == 1 and arguments[0] == "wiki":
-            text = format.formatStation(station_name, station, withWikiSummary=True)
+            text = format.formatStation(station_name, withWikiSummary=True)
             bot.api.call('editMessageText', {
                 'chat_id': cb.chat.id, 'message_id': cb.message.message_id,
                 'text': text, 'parse_mode': 'HTML', 'reply_markup':
@@ -459,7 +465,7 @@ def process_callback(bot, cb, u):
             return
 
         elif len(arguments) == 1:
-            date = (datetime.now() - timedelta(hours=(1 if is_DST() else 0))).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
+            date = (datetime.now() - (timedelta(hours=1) if is_DST() else 0)).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
             raw = api.call('partenze' if arguments[0] == 'departures' else 'arrivi', station, date)
             text = format.formatDepartures(raw, station, format.ELEMENTS_FOR_PAGE) if arguments[0] == 'departures' \
                 else format.formatArrivals(raw, station, format.ELEMENTS_FOR_PAGE)
@@ -480,7 +486,7 @@ def process_callback(bot, cb, u):
             )
 
         elif len(arguments) == 2:
-            date = (datetime.now() - timedelta(hours=(1 if is_DST() else 0))).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
+            date = (datetime.now() - (timedelta(hours=1) if is_DST() else 0)).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
             raw = api.call('partenze' if arguments[0] == 'departures' else 'arrivi', station, date)
             text = format.formatDepartures(raw, station, int(arguments[1])) if arguments[0] == 'departures' \
                 else format.formatArrivals(raw, station, int(arguments[1]))
@@ -503,34 +509,6 @@ def process_callback(bot, cb, u):
             )
 
     # ITINERARY CALLBACK
-    elif "itinerary@" in cb.query:
-        arguments = cb.query.split('@')
-        del(arguments[0])
-        station_a, station_b = arguments[0].split("_")
-        u.state('train_byiti_3')
-        u.setRedis('iti_station1', station_a)
-        u.setRedis('iti_station2', station_b)
-        u.addRecentElement('itineraries', u.formatRecentItineraryHash(station_a, station_b))
-
-        text = (
-            "<b>🛤 Cerca treno</b> per itinerario"
-            "\nInserisci ora <b>la data</b> e/o <b>l'orario di partenza</b> desiderati "
-            "(per esempio: <code>{a}</code>; <code>{b}</code>"
-            .format(a=datetime.now().strftime("%H:%M %d/%m/%y"),
-                    b=datetime.now().strftime("%H:%M"))
-        )
-        bot.api.call('editMessageText', {
-            'chat_id': cb.chat.id, 'message_id': cb.message.message_id,
-            'text': text, 'parse_mode': 'HTML', 'reply_markup':
-                json.dumps(
-                    {"inline_keyboard": [
-                        [{"text": "🕒 Orario attuale", "callback_data": "train_byiti@now"}],
-                        [{"text": "⬅️ Torna indietro", "callback_data": "home"}]
-                    ]}
-                )
-        })
-        return
-
     elif cb.query == "train_byiti@now":
         def minifyStation(__str):
             __str = __str[1:]
@@ -544,10 +522,8 @@ def process_callback(bot, cb, u):
 
         date = datetime.now()
 
-        station_a = u.getRedis('iti_station1').decode('utf-8')
-        station_b = u.getRedis('iti_station2').decode('utf-8')
-        u.addRecentElement('itineraries', u.formatRecentItineraryHash(station_a, station_b))
-        station_a, station_b = minifyStation(station_a), minifyStation(station_b)
+        station_a = minifyStation(u.getRedis('iti_station1').decode('utf-8'))
+        station_b = minifyStation(u.getRedis('iti_station2').decode('utf-8'))
 
         u.increaseStat('stats_trains_byiti')
 
@@ -639,7 +615,6 @@ def process_inline_callback(bot, cb, u):
 
         if not arguments:
             u.increaseStat('stats_trains_bynum')
-            u.addRecentElement('trains', cb.query.split("@")[1] + "@" + raw['compNumeroTreno'])
 
             text = format.formatTrain(raw)
             bot.api.call('editMessageText', {
@@ -667,7 +642,6 @@ def process_inline_callback(bot, cb, u):
                         ]}
                     )
             })
-            return
 
         elif arguments[0] == "update":
             text = format.formatTrain(raw)
@@ -720,7 +694,7 @@ def process_inline_callback(bot, cb, u):
 
         if not arguments:
             u.increaseStat('stats_stations')
-            text = format.formatStation(station_name, station)
+            text = format.formatStation(station_name)
             bot.api.call('editMessageText', {
                 'inline_message_id': cb.inline_message_id,
                 'text': text, 'parse_mode': 'HTML', 'reply_markup':
@@ -737,7 +711,7 @@ def process_inline_callback(bot, cb, u):
             return
 
         elif len(arguments) == 1 and arguments[0] == "wiki":
-            text = format.formatStation(station_name, station, withWikiSummary=True)
+            text = format.formatStation(station_name, withWikiSummary=True)
             bot.api.call('editMessageText', {
                 'inline_message_id': cb.inline_message_id,
                 'text': text, 'parse_mode': 'HTML', 'reply_markup':
@@ -752,7 +726,7 @@ def process_inline_callback(bot, cb, u):
             return
 
         elif len(arguments) == 1:
-            date = (datetime.now() - timedelta(hours=(1 if is_DST() else 0))).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
+            date = (datetime.now() - (timedelta(hours=1) if is_DST() else 0)).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
             raw = api.call('partenze' if arguments[0] == 'departures' else 'arrivi', station, date)
             text = format.formatDepartures(raw, station, format.ELEMENTS_FOR_PAGE) if arguments[0] == 'departures' \
                 else format.formatArrivals(raw, station, format.ELEMENTS_FOR_PAGE)
@@ -773,7 +747,7 @@ def process_inline_callback(bot, cb, u):
             )
 
         elif len(arguments) == 2:
-            date = (datetime.now() - timedelta(hours=(1 if is_DST() else 0))).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
+            date = (datetime.now() - (timedelta(hours=1) if is_DST() else 0)).strftime("%a %b %d %Y %H:%M:%S GMT+0100")
             raw = api.call('partenze' if arguments[0] == 'departures' else 'arrivi', station, date)
             text = format.formatDepartures(raw, station, int(arguments[1])) if arguments[0] == 'departures' \
                 else format.formatArrivals(raw, station, int(arguments[1]))
